@@ -33,6 +33,14 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
     result = {}
 
+    SETTINGS = {
+        "SUBITOIT_COMPANY_ID": {
+            "name": "Subito.it Company",
+            "description": "The Company which acts as a Supplier for all Subito.it Parts",
+            "model": "company.company",
+        },
+    }
+
     def import_image(self, url: str, part: PartAttachment) -> bool:
 
         if part.attachment:
@@ -58,6 +66,9 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
         return False
 
+    def import_image_async(self, url, part):
+        offload_task(self.import_image, url, part)
+
     def import_supplier_part(self, supplier_id, subito_list_id: str, part_id: str):
         print("Importing supplier part  " + subito_list_id)
 
@@ -78,7 +89,7 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
         supplier_part = SupplierPart.objects.get_or_create(
             part=part,
-            company=company,
+            supplier=company,
             SKU=subito_list_id,
         )[0]
 
@@ -98,6 +109,7 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
             part_attachment = PartAttachment.objects.get_or_create(
                 part=part,
+                link=image_url,
                 comment=image['uri'] 
             )[0]
 
@@ -117,7 +129,7 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
                 quantity=1,
             )[0]
 
-            supplier_part_price.price = 0.0
+            supplier_part_price.price = price
             supplier_part_price.save()
 
 
@@ -130,14 +142,14 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
         command = data.get("command")
 
-        if command == "add-supplier-part":
+        supplier_id = self.get_setting("SUBITOIT_COMPANY_ID")
 
-            supplier_id = 5
+        if command == "add_supplier_part":
 
             part_id = data.get("part_id")
             subito_list_id = data.get("subito_list_id")
 
-            self.import_supplier_part(supplier_id, part_id, subito_list_id)
+            self.import_supplier_part(supplier_id, subito_list_id, part_id)
 
     def get_info(self, user, data=None):
         """Sample method."""
