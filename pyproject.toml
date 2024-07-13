@@ -1,6 +1,6 @@
 [project]
 name = "inventree-subito-plugin"
-version = "0.2"
+version = "0.3"
 description = "Subito.it integration for InvenTree"
 readme = "README.md"
 requires-python = ">=3.8"

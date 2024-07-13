@@ -2,29 +2,33 @@
 
 import io
 import inspect, json, logging
-
+from django.urls import path
+from django.http import HttpResponse
 from plugin import InvenTreePlugin
-from plugin.mixins import ActionMixin, APICallMixin, SettingsMixin, EventMixin
+from plugin.mixins import (
+    ActionMixin,
+    APICallMixin,
+    SettingsMixin,
+    PanelMixin,
+    UrlsMixin,
+)
 from company.models import Company, SupplierPriceBreak
 from part.models import (
     Part,
     SupplierPart,
-    PartCategory,
-    PartParameterTemplate,
-    PartParameter,
-    BomItem,
-    BomItemSubstitute,
     PartAttachment,
 )
-from stock.models import StockItem
 from InvenTree.helpers_model import download_image_from_url
 from django.core.files.base import ContentFile
 from InvenTree.tasks import offload_task
+from part.views import PartDetail
 
 logger = logging.getLogger("subitoplugin")
 
 
-class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
+class SubitoPlugin(
+    ActionMixin, APICallMixin, SettingsMixin, PanelMixin, UrlsMixin, InvenTreePlugin
+):
     """An action plugin which offers variuous integrations with Subito.it."""
 
     NAME = "SubitoPlugin"
@@ -44,7 +48,7 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
     def import_image(self, url: str, part: PartAttachment) -> bool:
         """
         Download an image given it's URL, and attach it to the part.
-        Would be cool to attach it to the SupplierPart, but it's not really a 
+        Would be cool to attach it to the SupplierPart, but it's not really a
         thing for now.
         """
 
@@ -82,7 +86,7 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
         """
         Add a supplier part
         """
-        
+
         logger.info("Importing supplier part " + subito_list_id)
 
         url = "v1/search/items?list_ids=" + str(subito_list_id)
@@ -92,9 +96,9 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
         supplier_part_retired = False
 
         # If there are no ads, than the add has been retired.
-        if len(response['ads']) > 0:
-            supplier_part_data = response['ads'][0]
-        else: 
+        if len(response["ads"]) > 0:
+            supplier_part_data = response["ads"][0]
+        else:
             supplier_part_retired = True
 
         part = Part.objects.get(pk=part_id)
@@ -107,41 +111,39 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
             SKU=subito_list_id,
         )[0]
 
-        if supplier_part_retired: 
-            supplier_part.active=False,
+        if supplier_part_retired:
+            supplier_part.active = False
             supplier_part.update_available_quantity(0)
-            supplier_part.save()
-        else: 
-            supplier_part.active=True,
-            supplier_part.description = supplier_part_data['subject']
-            supplier_part.note = supplier_part_data['body']
-            supplier_part.link = supplier_part_data['urls']['default']
-            supplier_part.update_available_quantity(1)
+            # supplier_part.save()
+        else:
+            supplier_part.active = True
+            supplier_part.description = supplier_part_data["subject"]
+            supplier_part.note = supplier_part_data["body"]
+            supplier_part.link = supplier_part_data["urls"]["default"]
 
             # Save the whole object for good measure
-            supplier_part.metadata['subito'] = supplier_part_data
-            supplier_part.save()
+            supplier_part.metadata["subito"] = supplier_part_data
+            supplier_part.update_available_quantity(1)
+            # supplier_part.save()
 
             # Add images as part attachments
-            for image in supplier_part_data['images']:
+            for image in supplier_part_data["images"]:
 
-                image_url = image['scale'][4]['uri']
+                image_url = image["scale"][4]["uri"]
 
                 part_attachment = PartAttachment.objects.get_or_create(
-                    part=part,
-                    link=image_url,
-                    comment=image['uri'] 
+                    part=part, link=image_url, comment=image["uri"]
                 )[0]
 
                 self.import_image(image_url, part_attachment)
 
             # Add price break
             price = "0.0"
-            for feature in supplier_part_data['features']:
-                if feature['uri'] == '/price':
-                    price = feature['values'][0]['key']
+            for feature in supplier_part_data["features"]:
+                if feature["uri"] == "/price":
+                    price = feature["values"][0]["key"]
 
-            if(price != "0.0") :
+            if price != "0.0":
 
                 supplier_part_price = SupplierPriceBreak.objects.get_or_create(
                     part=supplier_part,
@@ -171,13 +173,16 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
 
         if command == "update_supplier_parts":
 
-            supplier_parts = SupplierPart.objects.filter(metadata__icontains="spoolman_id")
+            supplier_parts = SupplierPart.objects.filter(
+                metadata__icontains="subito"
+            )
 
             for supplier_part in supplier_parts:
                 logger.debug("Supplier part found: " + str(supplier_part.pk))
 
-                self.import_supplier_part(supplier_id, supplier_part.part.pk, supplier_part.SKU)
-
+                self.import_supplier_part(
+                    supplier_id, supplier_part.part.pk, supplier_part.SKU
+                )
 
     def get_info(self, user, data=None):
         """Sample method."""
@@ -186,3 +191,43 @@ class SubitoPlugin(ActionMixin, APICallMixin, SettingsMixin, InvenTreePlugin):
     def get_result(self, user=None, data=None):
         """Sample method."""
         return self.result
+
+    def get_custom_panels(self, view, request):
+        panels = []
+
+        if isinstance(view, PartDetail):
+
+            self.item = view.get_object()
+
+            panels.append(
+                {
+                    "title": "Subito.it Action",
+                    "icon": "fa-building ",
+                    "content_template": "subito/subito.html",
+                }
+            )
+
+        return panels
+
+    def setup_urls(self):
+        return [
+            path(
+                "add_supplier_part/<int:part_id>/<int:subito_list_id>/",
+                self.add_supplier_part,
+                name="add_supplier_part",
+            ),
+        ]
+
+    # Define the function that will be called.
+    def add_supplier_part(
+        self,
+        request,
+        part_id,
+        subito_list_id,
+    ):
+
+        supplier_id = self.get_setting("SUBITOIT_COMPANY_ID")
+
+        self.import_supplier_part(supplier_id, str(part_id), str(subito_list_id))
+
+        return HttpResponse(f"OK")

@@ -1,0 +1,15 @@
+<script>
+    async function example_select(){
+        const subito_list_id = parseInt(document.getElementById("subito_list_id").value)
+
+        response = inventreeFormDataUpload(url="{% url 'plugin:subito:add_supplier_part' '9998' '9999' %}"
+                                              .replace("9998", {{ plugin.item.pk }})
+                                              .replace("9999", subito_list_id)
+                                          );
+    }
+</script>
+    
+<form>
+    Subito.it ID: <input id="subito_list_id" class="" type="number" value="2"> <input class="btn btn-primary" type="submit" value="Add" onclick="example_select()" title='Add Supplier Part'>
+</form>
+
