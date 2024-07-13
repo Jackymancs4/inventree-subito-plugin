@@ -22,6 +22,7 @@ from InvenTree.helpers_model import download_image_from_url
 from django.core.files.base import ContentFile
 from InvenTree.tasks import offload_task
 from part.views import PartDetail
+from common.notifications import trigger_notification, UIMessageNotification
 
 logger = logging.getLogger("subitoplugin")
 
@@ -34,6 +35,7 @@ class SubitoPlugin(
     NAME = "SubitoPlugin"
     SLUG = "subito"
     ACTION_NAME = "subito"
+    TITLE = "Subito.it Integration"
 
     result = {}
 
@@ -82,7 +84,9 @@ class SubitoPlugin(
 
         offload_task(self.import_image, url, part)
 
-    def import_supplier_part(self, supplier_id, part_id: str, subito_list_id: str):
+    def import_supplier_part(
+        self, supplier_id, part_id: str, subito_list_id: str
+    ) -> SupplierPart:
         """
         Add a supplier part
         """
@@ -118,7 +122,12 @@ class SubitoPlugin(
         else:
             supplier_part.active = True
             supplier_part.description = supplier_part_data["subject"]
-            supplier_part.note = supplier_part_data["body"]
+            # TODO: change this to the full body
+            supplier_part.note = (
+                (supplier_part_data["body"][:98] + "..")
+                if len(supplier_part_data["body"]) > 100
+                else supplier_part_data["body"]
+            )
             supplier_part.link = supplier_part_data["urls"]["default"]
 
             # Save the whole object for good measure
@@ -151,7 +160,10 @@ class SubitoPlugin(
                 )[0]
 
                 supplier_part_price.price = price
+                supplier_part_price.price_currency = "EUR"
                 supplier_part_price.save()
+
+        return supplier_part
 
     @property
     def api_url(self):
@@ -173,9 +185,7 @@ class SubitoPlugin(
 
         if command == "update_supplier_parts":
 
-            supplier_parts = SupplierPart.objects.filter(
-                metadata__icontains="subito"
-            )
+            supplier_parts = SupplierPart.objects.filter(metadata__icontains="subito")
 
             for supplier_part in supplier_parts:
                 logger.debug("Supplier part found: " + str(supplier_part.pk))
@@ -228,6 +238,22 @@ class SubitoPlugin(
 
         supplier_id = self.get_setting("SUBITOIT_COMPANY_ID")
 
-        self.import_supplier_part(supplier_id, str(part_id), str(subito_list_id))
+        supplier_part = self.import_supplier_part(
+            supplier_id, str(part_id), str(subito_list_id)
+        )
+
+        users = [request.user]
+
+        trigger_notification(
+            supplier_part,
+            "inventree.plugin",
+            context={
+                "error": None,
+                "name": "Subito.it supplier part",
+                "message": "Supplier part created",
+            },
+            targets=users,
+            delivery_methods={UIMessageNotification},
+        )
 
         return HttpResponse(f"OK")
