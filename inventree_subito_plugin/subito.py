@@ -36,6 +36,8 @@ class SubitoPlugin(
     SLUG = "subito"
     ACTION_NAME = "subito"
     TITLE = "Subito.it Integration"
+    AUTHOR = "Jackymancs4"
+    LICENSE = "MIT"
 
     result = {}
 
